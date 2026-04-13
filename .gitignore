@@ -1,0 +1,5 @@
+venv311/
+venv/
+__pycache__/
+.DS_Store
+urban_forest.db
