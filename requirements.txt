@@ -1,5 +1,5 @@
 streamlit
-geemap
+geemap==0.33.0
 earthengine-api
 streamlit-folium
 setuptools
