@@ -1,15 +1,15 @@
 import streamlit as st
 import ee
-import geemap.foliumap as geemap
-import pandas as pd
-import sqlite3
-from datetime import datetime, timedelta
+import json
 
-# --- 1. GEE INITIALIZATION ---
-try:
-    ee.Initialize(project='your-project-id') # Replace with your GEE Project ID
-except:
-    ee.Authenticate()
+# Replace your old ee.Initialize() with this:
+if 'GEE_JSON_KEY' in st.secrets:
+    # This runs when the app is on the Web
+    json_info = json.loads(st.secrets['GEE_JSON_KEY'])
+    credentials = ee.ServiceAccountCredentials(json_info['client_email'], key_data=st.secrets['GEE_JSON_KEY'])
+    ee.Initialize(credentials=credentials)
+else:
+    # This runs when you are working on your Mac
     ee.Initialize()
 
 # --- 2. DATABASE UTILITIES ---
