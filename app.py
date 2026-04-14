@@ -3,33 +3,14 @@ import ee
 import json
 
 if 'GEE_JSON_KEY' in st.secrets:
-    try:
-        # 1. Get the secret (Streamlit likely parsed this as a dict already)
-        gee_dict = st.secrets['GEE_JSON_KEY']
-        
-        # 2. If it's a string for some reason, turn it into a dict
-        if isinstance(gee_dict, str):
-            gee_dict = json.loads(gee_dict)
-        
-        # 3. Use the more modern from_dict approach
-        from google.oauth2 import service_account
-        
-        # Define the scopes Earth Engine needs
-        scopes = ['https://www.googleapis.com/auth/earthengine', 
-                  'https://www.googleapis.com/auth/cloud-platform']
-        
-        credentials = service_account.Credentials.from_service_account_info(
-            gee_dict, scopes=scopes
-        )
-        
-        ee.Initialize(credentials=credentials)
-        
-    except Exception as e:
-        st.error(f"Final Auth Attempt Failed: {e}")
-        st.info("Check if your Secret includes the BEGIN and END PRIVATE KEY lines.")
-        st.stop()
+    # Read the secret as a raw string
+    raw_json = st.secrets['GEE_JSON_KEY']
+    # Parse it to get the email
+    info = json.loads(raw_json)
+    # Initialize using the raw string
+    credentials = ee.ServiceAccountCredentials(info['client_email'], key_data=raw_json)
+    ee.Initialize(credentials=credentials)
 else:
-    # Local fallback
     ee.Initialize()
 
 # --- 2. DATABASE UTILITIES ---
