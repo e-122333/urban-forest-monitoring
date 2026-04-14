@@ -2,14 +2,21 @@ import streamlit as st
 import ee
 import json
 
-# Replace your old ee.Initialize() with this:
 if 'GEE_JSON_KEY' in st.secrets:
-    # This runs when the app is on the Web
-    json_info = json.loads(st.secrets['GEE_JSON_KEY'])
-    credentials = ee.ServiceAccountCredentials(json_info['client_email'], key_data=st.secrets['GEE_JSON_KEY'])
-    ee.Initialize(credentials=credentials)
+    try:
+        # 1. Parse the secret string into a real Python dictionary
+        gee_json = json.loads(st.secrets['GEE_JSON_KEY'])
+        
+        # 2. Get the email and the raw JSON string for the key_data
+        client_email = gee_json['client_email']
+        
+        # 3. Initialize with the credentials
+        credentials = ee.ServiceAccountCredentials(client_email, key_data=st.secrets['GEE_JSON_KEY'])
+        ee.Initialize(credentials=credentials)
+    except Exception as e:
+        st.error(f"Auth Error: {e}")
+        st.stop()
 else:
-    # This runs when you are working on your Mac
     ee.Initialize()
 
 # --- 2. DATABASE UTILITIES ---
