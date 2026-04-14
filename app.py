@@ -4,143 +4,143 @@ import json
 import sqlite3
 import pandas as pd
 import geemap.foliumap as geemap
+from streamlit_folium import st_folium
 from datetime import datetime, timedelta
 
-# --- 1. AUTHENTICATION & INITIALIZATION ---
+# --- 1. AUTHENTICATION (EcoScan SDD 3.1.1) ---
 if 'GEE_JSON_KEY' in st.secrets:
     try:
         raw_json = st.secrets['GEE_JSON_KEY']
         info = json.loads(raw_json)
+        # Using the robust credentials method to prevent 'bytes' errors
         credentials = ee.ServiceAccountCredentials(info['client_email'], key_data=raw_json)
         ee.Initialize(credentials=credentials)
     except Exception as e:
-        st.error(f"Google Earth Engine Auth Failed: {e}")
+        st.error(f"EcoScan GEE Auth Failed: {e}")
         st.stop()
 else:
     try:
         ee.Initialize()
     except:
-        ee.Authenticate()
-        ee.Initialize()
+        st.error("No Earth Engine credentials found.")
+        st.stop()
 
-# --- 2. DATABASE UTILITIES ---
+# --- 2. DATABASE INITIALIZATION (EcoScan SDD 4.1/4.2) ---
 def init_db():
-    """Initializes the SQLite database for the cloud environment."""
     conn = sqlite3.connect('urban_forest.db')
     c = conn.cursor()
-    # Create Users table
+    # Users table (SDD 4.2)
     c.execute('''CREATE TABLE IF NOT EXISTS users 
                  (id INTEGER PRIMARY KEY, username TEXT, threshold REAL, email_alerts INTEGER)''')
-    # Create Alerts table
+    # Alerts table (SDD 4.2)
     c.execute('''CREATE TABLE IF NOT EXISTS alerts 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, district TEXT, loss_area REAL, severity TEXT)''')
     
-    # Insert a default user if the table is empty
     c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
         c.execute("INSERT INTO users (id, username, threshold, email_alerts) VALUES (1, 'AdminUser', 0.2, 1)")
-    
     conn.commit()
     conn.close()
 
-# Run database setup
 init_db()
 
-def get_user_settings():
-    conn = sqlite3.connect('urban_forest.db')
-    df = pd.read_sql_query("SELECT * FROM users WHERE id=1", conn)
-    conn.close()
-    return df.iloc[0]
+# --- 3. CONSTANTS & LOGIC (From SRS 4.1 & SDD 8) ---
+# NDVI Classification Palette from SDD Section 8 [cite: 162, 273]
+NDVI_VIS_PARAMS = {
+    'min': -0.2,
+    'max': 0.2,
+    'palette': ['#A50026', '#F46D43', '#FFFFBF', '#74C476', '#006837']
+}
 
-def log_alert(district, loss_area):
-    conn = sqlite3.connect('urban_forest.db')
-    c = conn.cursor()
-    severity = "High" if loss_area > 0.5 else "Medium"
-    c.execute("INSERT INTO alerts (date, district, loss_area, severity) VALUES (?, ?, ?, ?)",
-              (datetime.now().strftime("%Y-%m-%d"), district, loss_area, severity))
-    conn.commit()
-    conn.close()
+# Regional Processing Chunks from SRS Section 4.1 [cite: 81-87]
+REGIONS = {
+    "Northern Region": ["Uttarakhand", "Himachal Pradesh", "Jammu & Kashmir", "Punjab", "Haryana"],
+    "Western Region": ["Rajasthan", "Gujarat", "Maharashtra"],
+    "Eastern Region": ["West Bengal", "Odisha", "Bihar", "Jharkhand"],
+    "Southern Region": ["Karnataka", "Tamil Nadu", "Kerala", "Andhra Pradesh", "Telangana"],
+    "Central Region": ["Madhya Pradesh", "Chhattisgarh", "Uttar Pradesh"]
+}
 
-# --- 3. STREAMLIT UI SETUP ---
-st.set_page_config(layout="wide", page_title="Urban Forest Intelligence")
-
-# Sidebar: Profile & Navigation
-with st.sidebar:
-    st.title("👤 User Profile")
-    settings = get_user_settings()
-    st.write(f"Logged in: **{settings['username']}**")
-    
-    with st.expander("⚙️ Settings"):
-        new_thresh = st.slider("Detection Threshold", 0.1, 0.5, float(settings['threshold']))
-        email_opt = st.checkbox("Enable Notifications", value=bool(settings['email_alerts']))
-        if st.button("Save Preferences"):
-            # Update Logic
-            conn = sqlite3.connect('urban_forest.db')
-            c = conn.cursor()
-            c.execute("UPDATE users SET threshold=?, email_alerts=? WHERE id=1", (new_thresh, int(email_opt)))
-            conn.commit()
-            conn.close()
-            st.success("Preferences Saved!")
-    
-    if st.button("Logout"): 
-        st.stop()
-
-# --- 4. DASHBOARD CONTENT ---
-st.title("🌳 Urban Forest Monitoring System")
-
-# Summary Metrics (Dummy data for demo)
-col1, col2, col3 = st.columns(3)
-col1.metric("Current Health Index", "0.62 NDVI", "+2%")
-col2.metric("Alerts This Week", "12", "-3")
-col3.metric("System Status", "Live", delta_color="normal")
-
-# --- 5. SATELLITE ENGINE (GEE) ---
 def get_ndvi_layer(roi, start_date, end_date):
+    """Fetches Sentinel-2 data and calculates NDVI[cite: 78, 197]."""
+    # SRS Requirement FR-02: Filter images with cloud cover > 20% 
     s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") \
         .filterBounds(roi) \
         .filterDate(start_date, end_date) \
-        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10)) \
+        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20)) \
         .median()
+    # SRS Requirement FR-03: NDVI calculation using B8 and B4 [cite: 78, 108]
     return s2.normalizedDifference(['B8', 'B4'])
 
-# Map View Setup
-st.subheader("🗺️ Interactive Monitoring Map")
+# --- 4. STREAMLIT UI SETUP ---
+st.set_page_config(layout="wide", page_title="EcoScan - India Greenery Monitor")
 
-# Date Selectors
+with st.sidebar:
+    st.title("👤 EcoScan Profile")
+    # Fetch user from SQLite
+    conn = sqlite3.connect('urban_forest.db')
+    user = pd.read_sql_query("SELECT * FROM users WHERE id=1", conn).iloc[0]
+    conn.close()
+    
+    st.write(f"Logged in: **{user['username']}**")
+    
+    selected_chunk = st.selectbox("Select Region (SRS 4.1)", list(REGIONS.keys()))
+    st.info(f"Target Area: {', '.join(REGIONS[selected_chunk])}")
+    
+    if st.button("Logout"): st.stop()
+
+st.title("🌳 EcoScan: India Greenery Monitoring System")
+st.markdown("### National-level Vegetation Analysis [cite: 90]")
+
+# Metrics
+c1, c2, c3 = st.columns(3)
+c1.metric("National Health Index", "0.62 NDVI", "+2% [cite: 96]")
+c2.metric("Critical Alerts", "5", "High Severity [cite: 102]")
+c3.metric("System Status", "Live (GEE)")
+
+# --- 5. MAP VIEW (SDD 3.4) ---
+st.subheader("🗺️ Interactive NDVI Monitoring Map [cite: 112]")
+
 d_col1, d_col2 = st.columns(2)
-start = d_col1.date_input("Start Date", datetime.now() - timedelta(days=365))
-end = d_col2.date_input("End Date", datetime.now())
+# SRS 2.3: System maintains data from 2020 onwards [cite: 36]
+start_date = d_col1.date_input("Start Date", datetime(2023, 1, 1))
+end_date = d_col2.date_input("End Date", datetime.now())
 
-# Initialize Map
-m = geemap.Map(center=[40.78, -73.96], zoom=13, ee_initialize=False) 
-roi = ee.Geometry.Point([-73.96, 40.78]).buffer(2000)
+# Initialize map centered on India [cite: 33]
+# ee_initialize=False prevents the AttributeError with Python 3.14
+m = geemap.Map(center=[20.5937, 78.9629], zoom=5, ee_initialize=False)
 
-# Generate and Add NDVI
+# Define India AOI [cite: 33, 126]
+india_roi = ee.Geometry.Rectangle([68.1, 6.5, 97.4, 35.5])
+
 try:
-    ndvi = get_ndvi_layer(roi, start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
-    m.addLayer(ndvi, {'min': 0, 'max': 1, 'palette': ['red', 'yellow', 'green']}, 'Current NDVI')
-    m.centerObject(roi, 14)
+    ndvi = get_ndvi_layer(india_roi, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+    # Use the 5-category color scheme from SDD Section 8 
+    m.addLayer(ndvi, NDVI_VIS_PARAMS, 'EcoScan NDVI')
 except Exception as e:
-    st.warning(f"Could not load satellite data: {e}")
+    st.error(f"Data Processing Error: {e}")
 
-m.to_streamlit(height=500)
+st_folium(m, width=1200, height=550)
 
-# --- 6. DISTRICT CARDS & REPORTS ---
+# --- 6. ALERTS & LOGS (SRS 4.3 / SDD 3.2) ---
 st.divider()
-st.subheader("📋 District Status & Alerts")
+st.subheader("📋 Recent Environmental Alerts [cite: 101, 210]")
 
-# Manual Trigger for Demo Purposes
-if st.button("🚀 Run Manual Sync (Detect New Loss)"):
-    log_alert("North District", 0.8)
+if st.button("🚀 Trigger Manual Sync (Detection Test)"):
+    # Mock detection logic for the demo
+    conn = sqlite3.connect('urban_forest.db')
+    c = conn.cursor()
+    c.execute("INSERT INTO alerts (date, district, loss_area, severity) VALUES (?, ?, ?, ?)",
+              (datetime.now().strftime("%Y-%m-%d"), "Dehradun", 0.85, "Critical [cite: 102]"))
+    conn.commit()
+    conn.close()
     st.rerun()
 
-# Display Alerts from SQL
 conn = sqlite3.connect('urban_forest.db')
 alerts_df = pd.read_sql_query("SELECT * FROM alerts ORDER BY id DESC", conn)
 conn.close()
 
 if not alerts_df.empty:
     st.dataframe(alerts_df, use_container_width=True)
-    st.download_button("📥 Download Report", alerts_df.to_csv(index=False), "forest_report.csv")
 else:
-    st.info("No illegal removals detected in the selected timeframe.")
+    st.info("No significant vegetation loss detected for the selected period[cite: 99].")
