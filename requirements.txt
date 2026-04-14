@@ -1,5 +1,8 @@
 streamlit
-geemap==0.33.0
 earthengine-api
+geemap==0.34.1
+pandas
 streamlit-folium
-setuptools
+python-box==6.0.2
+ipython<8.10.0
+setuptools<81.0.0
