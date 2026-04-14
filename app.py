@@ -4,20 +4,26 @@ import json
 
 if 'GEE_JSON_KEY' in st.secrets:
     try:
-        # 1. Parse the secret string into a real Python dictionary
-        gee_json = json.loads(st.secrets['GEE_JSON_KEY'])
+        # 1. Get the raw string directly from secrets
+        raw_json_str = st.secrets['GEE_JSON_KEY']
         
-        # 2. Get the email and the raw JSON string for the key_data
+        # 2. Parse it ONLY to get the email address
+        gee_json = json.loads(raw_json_str)
         client_email = gee_json['client_email']
         
-        # 3. Initialize with the credentials
-        credentials = ee.ServiceAccountCredentials(client_email, key_data=st.secrets['GEE_JSON_KEY'])
+        # 3. Pass the RAW STRING (not the dictionary) to key_data
+        credentials = ee.ServiceAccountCredentials(client_email, key_data=raw_json_str)
         ee.Initialize(credentials=credentials)
     except Exception as e:
         st.error(f"Auth Error: {e}")
         st.stop()
 else:
-    ee.Initialize()
+    # This is for your local Mac testing
+    try:
+        ee.Initialize()
+    except:
+        ee.Authenticate()
+        ee.Initialize()
 
 # --- 2. DATABASE UTILITIES ---
 def get_user_settings():
