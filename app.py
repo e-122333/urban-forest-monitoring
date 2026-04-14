@@ -112,7 +112,7 @@ start = d_col1.date_input("Start Date", datetime.now() - timedelta(days=365))
 end = d_col2.date_input("End Date", datetime.now())
 
 # Initialize Map
-m = geemap.Map(center=[40.78, -73.96], zoom=13) 
+m = geemap.Map(center=[40.78, -73.96], zoom=13, ee_initialize=False) 
 roi = ee.Geometry.Point([-73.96, 40.78]).buffer(2000)
 
 # Generate and Add NDVI
