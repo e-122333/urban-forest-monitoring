@@ -72,25 +72,57 @@ def get_ndvi_layer(roi, start_date, end_date):
     # SRS Requirement FR-03: NDVI calculation using B8 and B4 [cite: 78, 108]
     return s2.normalizedDifference(['B8', 'B4'])
 
+# --- 5. SATELLITE ENGINE (GEE) ---
+def get_ndvi_data(roi, start_date, end_date):
+    """Fetches Sentinel-2 data and calculates Mean NDVI for the Metrics."""
+    s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") \
+        .filterBounds(roi) \
+        .filterDate(start_date, end_date) \
+        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20)) \
+        .median()
+    
+    ndvi_image = s2.normalizedDifference(['B8', 'B4'])
+    
+    # Calculate Mean NDVI for the specific ROI (From SDD 3.1.1)
+    stats = ndvi_image.reduceRegion(
+        reducer=ee.Reducer.mean(),
+        geometry=roi,
+        scale=100, # Higher scale for faster computation of metrics
+        maxPixels=1e9
+    )
+    return ndvi_image, stats
+
 # --- 4. STREAMLIT UI SETUP ---
-st.set_page_config(layout="wide", page_title="EcoScan - India Greenery Monitor")
+# (Inside your Main Dashboard area)
 
-with st.sidebar:
-    st.title("👤 EcoScan Profile")
-    # Fetch user from SQLite
-    conn = sqlite3.connect('urban_forest.db')
-    user = pd.read_sql_query("SELECT * FROM users WHERE id=1", conn).iloc[0]
-    conn.close()
-    
-    st.write(f"Logged in: **{user['username']}**")
-    
-    selected_chunk = st.selectbox("Select Region (SRS 4.1)", list(REGIONS.keys()))
-    st.info(f"Target Area: {', '.join(REGIONS[selected_chunk])}")
-    
-    if st.button("Logout"): st.stop()
+# Define the ROI based on Regional Chunks (From SRS 4.1)
+# These are rough bounding boxes for India's regions
+REGION_COORDS = {
+    "Northern Region": ee.Geometry.Rectangle([73.0, 28.0, 80.0, 36.0]),
+    "Western Region": ee.Geometry.Rectangle([68.0, 18.0, 77.0, 30.0]),
+    "Eastern Region": ee.Geometry.Rectangle([83.0, 19.0, 97.0, 29.0]),
+    "Southern Region": ee.Geometry.Rectangle([74.0, 8.0, 80.0, 20.0]),
+    "Central Region": ee.Geometry.Rectangle([77.0, 21.0, 84.0, 30.0])
+}
 
-st.title("🌳 EcoScan: India Greenery Monitoring System")
-st.markdown("### National-level Vegetation Analysis [cite: 90]")
+target_roi = REGION_COORDS.get(selected_chunk, india_roi)
+
+# Fetch Data
+try:
+    ndvi_layer, stats_result = get_ndvi_data(target_roi, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+    
+    # Extract actual value from GEE
+    mean_ndvi_value = stats_result.get('nd').getInfo() 
+    if mean_ndvi_value is None: mean_ndvi_value = 0.0
+    
+    # Display Metrics dynamically
+    c1, c2, c3 = st.columns(3)
+    c1.metric(f"{selected_chunk} Health", f"{mean_ndvi_value:.2f} NDVI", delta="Real-time")
+    c2.metric("Critical Alerts", "5", "High Severity") # Logic for alerts is in your DB
+    c3.metric("System Status", "Live (GEE)")
+
+except Exception as e:
+    st.error(f"Computation Error: {e}")
 
 # Metrics
 c1, c2, c3 = st.columns(3)
