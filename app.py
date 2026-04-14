@@ -4,26 +4,27 @@ import json
 
 if 'GEE_JSON_KEY' in st.secrets:
     try:
-        # 1. Get the raw string directly from secrets
-        raw_json_str = st.secrets['GEE_JSON_KEY']
+        # 1. Access the secret (Streamlit might have auto-parsed this into a dict)
+        gee_json_data = st.secrets['GEE_JSON_KEY']
         
-        # 2. Parse it ONLY to get the email address
-        gee_json = json.loads(raw_json_str)
-        client_email = gee_json['client_email']
+        # 2. If it's already a dictionary, convert it back to a JSON string
+        if isinstance(gee_json_data, dict):
+            raw_json_str = json.dumps(gee_json_data)
+            client_email = gee_json_data['client_email']
+        else:
+            # If it's already a string, use it as is
+            raw_json_str = gee_json_data
+            client_email = json.loads(raw_json_str)['client_email']
         
-        # 3. Pass the RAW STRING (not the dictionary) to key_data
+        # 3. Initialize with the stringified key_data
         credentials = ee.ServiceAccountCredentials(client_email, key_data=raw_json_str)
         ee.Initialize(credentials=credentials)
+        
     except Exception as e:
         st.error(f"Auth Error: {e}")
         st.stop()
 else:
-    # This is for your local Mac testing
-    try:
-        ee.Initialize()
-    except:
-        ee.Authenticate()
-        ee.Initialize()
+    ee.Initialize()
 
 # --- 2. DATABASE UTILITIES ---
 def get_user_settings():
